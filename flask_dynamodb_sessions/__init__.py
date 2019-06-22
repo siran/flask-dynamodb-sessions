@@ -96,7 +96,7 @@ class DynamodbSessionInterface(SessionInterface):
             id = req.headers.get(self.header_name)
         else:
             id = req.cookies.get(app.session_cookie_name)
-        
+
         if id is None:
             id = str(uuid4())
             return DynamodbSession(sid=id, permanent=self.permanent)
@@ -176,7 +176,6 @@ class DynamodbSessionInterface(SessionInterface):
 
     def dynamo_save(self, session_id, session):
         try:
-            print(session)
             fields = {
                 'data': {'S': self.pickle_session(session)},
                 'modified': {'S': str(datetime.utcnow())},

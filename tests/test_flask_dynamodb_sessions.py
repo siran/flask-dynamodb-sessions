@@ -1,9 +1,14 @@
 import pytest
+from mock import call
 import re
 from pytest_mock import mocker
 import flask
 import flask.sessions
-from flask_dynamodb_sessions import Session
+from flask_dynamodb_sessions import (
+    Session,
+    DynamodbSessionInterface,
+    DynamodbSession
+)
 
 
 def test_session_boto_settings(mocker):
@@ -106,3 +111,133 @@ def test_consistent_read_true(mocker):
 
     # Validate ConsistentRead setting
     assert 'ConsistentRead=True' in str(boto_mock_instance.get_item.call_args)
+
+
+class TestDynamoSessionInterface:
+
+    @pytest.fixture
+    def base(self):
+        """ instantiate a dynamo sesson interface
+            instance for tests
+
+            overwrite all keyword defaults
+        """
+        dsi = DynamodbSessionInterface(
+            table='test-table',
+            permanent=False,
+            endpoint='http://test-ep',
+            region='us-compton-2',
+            ttl='5963',
+            use_header=True,
+            header_name='test-header',
+            consistent_read=True
+        )
+
+        return dsi
+
+    def test_boto_client(self, base, mocker):
+        """ Test boto3.client created with
+            instantiated config
+        """
+        boto_mock = mocker.patch('flask_dynamodb_sessions.boto3')
+
+        boto_client = base.boto_client()
+
+        assert boto_mock.method_calls ==\
+            [call.client('dynamodb',
+                         endpoint_url='http://test-ep',
+                         region_name='us-compton-2')]
+
+    def test_open_session_no_id(self, base, mocker):
+        """ Test open_session with id==None condition
+
+            Note:
+                We should get a DynamoSession back
+                with a new session id
+        """
+        uuid_mock = mocker.patch('flask_dynamodb_sessions.uuid4')
+        uuid_mock.return_value = 'mock-uuid'
+        app_mock = mocker.MagicMock(flask.Flask(__name__))
+        req_mock = mocker.MagicMock()
+        req_mock.headers.get.return_value = None
+
+        result = base.open_session(app_mock, req_mock)
+
+        assert result.sid == 'mock-uuid'
+
+    def test_open_session_header(self, base, mocker):
+        """ Test open_session in user_header mode
+            and id present
+
+            Note:
+                We should get a DynamoSession
+                with the mocked id and request.headers
+                called with configured header_name
+        """
+        req_mock = mocker.MagicMock()
+        req_mock.headers.get.return_value = 'header-id'
+        base.dynamo_get = mocker.MagicMock(return_value=None)
+
+        app_mock = mocker.MagicMock(flask.Flask(__name__))
+
+        result = base.open_session(app_mock, req_mock)
+
+        # assert session id
+        assert result.sid == 'header-id'
+        # assert request headers called
+        # w/config'd header_name
+        assert req_mock.method_calls ==\
+            [call.headers.get('test-header')]
+
+    def test_open_session_cookie(self, base, mocker):
+        """
+        """
+        pass
+
+    def test_open_session_hydrate(self, base, mocker):
+        """
+        """
+        pass
+
+    def test_dynamo_get(self, base, mocker):
+        """
+        """
+        pass
+
+    def test_dynamo_get_exception(self, base, mocker):
+        """
+        """
+        pass
+
+    def test_dynamo_save(self, base, mocker):
+        """
+        """
+        pass
+
+    def test_dynamo_save_exception(self, base, mocker):
+        """
+        """
+        pass
+
+    def test_delete_session(self, base, mocker):
+        """
+        """
+        pass
+
+    def test_delete_session_exception(self, base, mocker):
+        """
+        """
+        pass
+
+    def test_pickle_session(self, base, mocker):
+        """
+        """
+        pass
+
+    def test_hydrate_session(self, base, mocker):
+        """
+        """
+        pass
+
+
+
