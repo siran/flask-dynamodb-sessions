@@ -4,23 +4,12 @@ import re
 from pytest_mock import mocker
 import flask
 import flask.sessions
+import boto3
 from flask_dynamodb_sessions import (
     Session,
     DynamodbSessionInterface,
     DynamodbSession
 )
-
-
-def test_session_boto_settings(mocker):
-
-    client_mock = mocker.patch('flask_dynamodb_sessions.boto3.client')
-
-    app = flask.Flask(__name__)
-
-    app.config.update(
-        SESSION_DYNAMODB_REGION='bogus-region',
-        SESSION_DYNAMODB_ENDPOINT='http://bogus:1234'
-    )
 
 
 def create_test_app(**kwargs):
@@ -166,7 +155,7 @@ class TestDynamoSessionInterface:
         assert result.sid == 'mock-uuid'
 
     def test_open_session_header(self, base, mocker):
-        """ Test open_session in user_header mode
+        """ Test open_session in use_header mode
             and id present
 
             Note:
@@ -190,24 +179,107 @@ class TestDynamoSessionInterface:
             [call.headers.get('test-header')]
 
     def test_open_session_cookie(self, base, mocker):
+        """ Test open_session in cookie mode w/id
+            present
+
+            Note:
+                We should get a DynamoSession
+                with the mocked id and request.cookies
+                being called using flask apps session
+                cookie name prop
+
         """
-        """
-        pass
+        # set use_header to false
+        base.use_header = False
+        req_mock = mocker.MagicMock()
+        req_mock.cookies.get.return_value='cookie-id'
+        base.dynamo_get = mocker.MagicMock(return_value=None)
+
+        app_mock = mocker.MagicMock(flask.Flask(__name__))
+
+        result = base.open_session(app_mock, req_mock)
+
+        # assert cookie was called with
+        # flask app's session_cookie_name prop
+        assert req_mock.method_calls ==\
+            [call.cookies.get(app_mock.session_cookie_name)]
+
+        # assert returned session id
+        assert result.sid == 'cookie-id'
+
 
     def test_open_session_hydrate(self, base, mocker):
+        """ Test open_session as if we were resuming
+            and already established session saved
+            in dynamo
         """
-        """
-        pass
+        req_mock = mocker.MagicMock()
+        req_mock.headers.get.return_value = 'header-id'
+        base.dynamo_get = mocker.MagicMock(return_value='session-data')
+        base.hydrate_session = mocker.MagicMock(return_value={'hydrated': 'data'})
 
-    def test_dynamo_get(self, base, mocker):
+        app_mock = mocker.MagicMock(flask.Flask(__name__))
+
+        result = base.open_session(app_mock, req_mock)
+
+        # assert hydrate was called with mocked session data
+        assert base.hydrate_session.call_args_list ==\
+            [call('session-data')]
+
+        # assert returned session data
+        assert dict(result) == {'hydrated': 'data'}
+
+    @pytest.fixture
+    def dynamo_get_return(self):
         """
         """
-        pass
+        return {
+            'Item': {
+                'data': {
+                    'S': 'session-body'
+                }
+            }
+        }
+
+    def test_dynamo_get(self,
+                        base,
+                        dynamo_get_return,
+                        mocker):
+        """ Test dynamo_get with mock return
+        """
+        boto_mock = mocker.MagicMock(boto3.client('dynamodb'))
+        boto_mock.get_item.return_value = dynamo_get_return
+        base._boto_client = boto_mock
+
+        res = base.dynamo_get('mock-id')
+
+        # assert return value
+        assert res == 'session-body'
+
+        # assert boto method calls
+        assert boto_mock.method_calls ==\
+            [call.get_item(
+                ConsistentRead=True,
+                Key={'id': {'S': 'mock-id'}},
+                TableName='test-table')]
 
     def test_dynamo_get_exception(self, base, mocker):
+        """ Test dynamo_get with api raising exception
         """
-        """
-        pass
+        boto_mock = mocker.MagicMock(boto3.client('dynamodb'))
+        boto_mock.get_item.side_effect = (Exception('get_item error'))
+        base._boto_client = boto_mock
+        print_mock = mocker.patch('flask_dynamodb_sessions.print')
+
+        res = base.dynamo_get('mock')
+
+        # result should be none
+        assert res is None
+
+        # exception should have printed
+        assert print_mock.mock_calls ==\
+            [call('DYNAMO SESSION GET ITEM ERR: ',
+                  'get_item error')]
 
     def test_dynamo_save(self, base, mocker):
         """
